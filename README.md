@@ -1,6 +1,6 @@
 # lovechat
 
-> A Jetpack Compose chat UI for Android — *"ai" 爱 means love in Chinese.*
+> A Jetpack Compose chat UI for Android — * love means "ai" 爱 in Chinese.*
 
 A streaming-style AI-chat interface built with Jetpack Compose and Material 3, packaged as a small reusable library (`:chatui`) plus two demo apps that show how the same library can power very different products.
 
