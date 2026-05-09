@@ -10,15 +10,11 @@ The chat experience is intentionally locally driven — there's no real backend 
 
 **`:demo-myai`** — sunset palette, serif typography, custom hamburger top bar and pill composer:
 
-<video src="https://github.com/chinalwb/lovechat/raw/main/docs/lovechat-demo1.mp4" controls width="320">
-  Your browser doesn't support inline video — <a href="docs/lovechat-demo1.mp4">download the demo video</a>.
-</video>
+https://github.com/user-attachments/assets/a52a027c-84b2-4466-b7c0-8c8bfd1667a6
 
 **`:app`** — clean light theme, default top bar and composer:
 
-<video src="https://github.com/chinalwb/lovechat/raw/main/docs/lovechat-demo2.mp4" controls width="320">
-  Your browser doesn't support inline video — <a href="docs/lovechat-demo2.mp4">download the demo video</a>.
-</video>
+https://github.com/user-attachments/assets/a657c24c-5328-42f2-b370-8fa4989eda9c
 
 ## Modules
 
