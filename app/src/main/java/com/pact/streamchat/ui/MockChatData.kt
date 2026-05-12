@@ -77,6 +77,36 @@ var visible by remember { mutableStateOf(true) }
 This removes the `.value` boilerplate and reads more naturally in Kotlin.
             """.trimIndent()
 
+            "table" in normalized -> """
+**Tables** render as a real grid, with column widths sized to content and a horizontal-scroll wrapper for wide tables. Inline markdown — *italics*, **bold**, `code` — works inside cells.
+
+### Narrow: scroll behavior
+
+This one fits in the bubble without scrolling.
+
+| State | Auto-scroll | FAB |
+| :--- | :---: | :---: |
+| `Idle` | no | no |
+| `Streaming` (follow on) | **yes** | no |
+| `Streaming` (follow off) | no | **yes** |
+| `Complete` | no | *conditional* |
+
+### Wide: streaming chunk knobs
+
+Seven columns — too wide for the bubble, so the renderer wraps it in `horizontalScroll`. Swipe sideways to see the rest.
+
+| Parameter | Min | Max | Default | Unit | Owner | Note |
+| :--- | ---: | ---: | ---: | :---: | :--- | :--- |
+| `chunkSize` | 2 | 12 | 7 | chars | `MockChatService` | uniform random |
+| `burstProb` | 0.0 | 1.0 | 0.10 | ratio | `MockChatService` | per-emit roll |
+| `burstMul` | 1 | 8 | 4 | × | `MockChatService` | multiplier on burst |
+| `delayMs` | 15 | 60 | 35 | ms | `MockChatService` | inter-chunk pause |
+| `thinkingDelay` | 0 | — | 800 | ms | `ChatViewModel` | before first chunk |
+| `typewriterCps` | 10 | 200 | 80 | chars/s | `AnimatedParagraph` | reveal rate |
+
+Long cells wrap at the column max (`200dp` by default) — see the `Note` column.
+            """.trimIndent()
+
             "markdown" in normalized || "format" in normalized -> """
 This renderer supports several **inline styles**:
 

@@ -16,6 +16,8 @@ import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.scrollBy
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
@@ -33,6 +35,7 @@ import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -43,6 +46,7 @@ import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.ArrowUpward
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.Menu
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -82,9 +86,9 @@ import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
-import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -96,112 +100,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
-
-// ---------------------------------------------------------------------------
-// Document-level parser: handles code fences + inline markdown per line
-// ---------------------------------------------------------------------------
-
-/**
- * Parse full message text into an [AnnotatedString].
- *
- * Strategy:
- * - Split by `\n` and track code-block state across lines.
- * - Pre-scan for closed code blocks (matching ``` pairs) when [isComplete].
- * - Closed code blocks get styled background + keyword coloring.
- * - Unclosed code blocks (mid-stream) render as plain monospace.
- * - Normal lines get inline markdown parsing.
- */
-private fun parseDocument(fullText: String, isComplete: Boolean, colors: MarkdownColors): AnnotatedString {
-    if (fullText.isEmpty()) return AnnotatedString("")
-
-    val lines = fullText.split("\n")
-
-    // Pre-scan: identify line-index ranges of CLOSED code blocks
-    val closedBlockRanges = mutableListOf<IntRange>()
-    var openLine = -1
-    lines.forEachIndexed { i, line ->
-        if (line.trimStart().startsWith("```")) {
-            if (openLine == -1) {
-                openLine = i
-            } else {
-                closedBlockRanges.add(openLine..i)
-                openLine = -1
-            }
-        }
-    }
-    // If isComplete and there's an unclosed block, it stays plain monospace (openLine != -1)
-
-    return buildAnnotatedString {
-        var inCodeBlock = false
-
-        lines.forEachIndexed { lineIndex, line ->
-            if (lineIndex > 0) append("\n")
-
-            val isFence = line.trimStart().startsWith("```")
-
-            if (isFence) {
-                inCodeBlock = !inCodeBlock
-                // Render fence line as dim monospace label
-                pushStyle(SpanStyle(fontFamily = FontFamily.Monospace, color = colors.fenceColor, fontSize = 13.sp))
-                append(line)
-                pop()
-                return@forEachIndexed
-            }
-
-            if (inCodeBlock) {
-                val isInClosedBlock = closedBlockRanges.any { lineIndex in it }
-                if (isInClosedBlock || isComplete) {
-                    // Fully closed code block: styled with keyword coloring
-                    appendStyledCodeLine(line, colors)
-                } else {
-                    // Unclosed block during streaming: plain monospace, no background
-                    pushStyle(SpanStyle(fontFamily = FontFamily.Monospace, fontSize = 14.sp))
-                    append(line)
-                    pop()
-                }
-                return@forEachIndexed
-            }
-
-            // Headers: # , ## , ###
-            if (line.startsWith("### ")) {
-                pushStyle(SpanStyle(fontSize = 18.sp, fontWeight = FontWeight.Bold))
-                appendInlineMarkdown(line.substring(4), colors)
-                pop()
-                return@forEachIndexed
-            }
-            if (line.startsWith("## ")) {
-                pushStyle(SpanStyle(fontSize = 20.sp, fontWeight = FontWeight.Bold))
-                appendInlineMarkdown(line.substring(3), colors)
-                pop()
-                return@forEachIndexed
-            }
-            if (line.startsWith("# ")) {
-                pushStyle(SpanStyle(fontSize = 24.sp, fontWeight = FontWeight.Bold))
-                appendInlineMarkdown(line.substring(2), colors)
-                pop()
-                return@forEachIndexed
-            }
-
-            // Bullet points: - or *  (only at line start, not mid-sentence asterisks)
-            if (line.startsWith("- ") || line.startsWith("* ")) {
-                append("  \u2022 ")
-                appendInlineMarkdown(line.substring(2), colors)
-                return@forEachIndexed
-            }
-
-            // Block quote
-            if (line.startsWith("> ")) {
-                pushStyle(SpanStyle(color = colors.fenceColor, fontStyle = FontStyle.Italic))
-                appendInlineMarkdown(line.substring(2), colors)
-                pop()
-                return@forEachIndexed
-            }
-
-            // Normal line: inline markdown
-            appendInlineMarkdown(line, colors)
-        }
-    }
-}
 
 // ---------------------------------------------------------------------------
 // Composable: Thinking indicator (three bouncing dots)
@@ -254,9 +152,11 @@ private fun ThinkingIndicator(horizontalPadding: Dp) {
 // ---------------------------------------------------------------------------
 
 /**
- * Renders markdown text as a column of paragraphs (split by blank lines).
- * Each new paragraph animates in with fadeIn + slideUp when it first enters
- * composition. The blinking cursor attaches to the last paragraph during streaming.
+ * Renders markdown text as a column of [MarkdownBlock]s. Paragraphs animate
+ * in via the typewriter [AnimatedParagraph]; tables pop in atomically through
+ * [MarkdownTable]. Block reveal is sequential — each block advances the queue
+ * via `onRevealComplete` so the next one starts only after the current one
+ * finishes (or pops, for tables).
  */
 @Composable
 private fun MarkdownText(
@@ -265,60 +165,66 @@ private fun MarkdownText(
     modifier: Modifier = Modifier
 ) {
     val chatColors = LocalChatColors.current
-    val markdownColors = MarkdownColors(
-        codeBg = chatColors.codeBlockBackground,
-        codeText = chatColors.codeBlockText,
-        keywordColor = chatColors.keywordHighlight,
-        fenceColor = chatColors.codeFenceLabel,
-    )
-
-    val paragraphs = remember(fullText) {
-        fullText.split("\n\n").filter { it.isNotBlank() }
+    val markdownColors = remember(chatColors) {
+        MarkdownColors(
+            codeBg = chatColors.codeBlockBackground,
+            codeText = chatColors.codeBlockText,
+            keywordColor = chatColors.keywordHighlight,
+            fenceColor = chatColors.codeFenceLabel,
+            linkColor = chatColors.linkColor,
+        )
     }
 
-    // Sequential reveal: only advance to the next paragraph after
-    // the current one finishes its typewriter animation. rememberSaveable so
-    // the queue state survives LazyColumn item disposal — without this,
-    // scrolling the bubble off-screen and back resets revealedUpTo to 0 and
-    // re-runs every paragraph's typewriter.
+    val blocks = remember(fullText, isStreaming, markdownColors) {
+        parseMarkdownBlocks(text = fullText, isComplete = !isStreaming, colors = markdownColors)
+    }
+
+    // Sequential reveal queue, indexed over blocks (paragraphs + tables).
+    // rememberSaveable so it survives LazyColumn item disposal — without this,
+    // scrolling the bubble off-screen and back would reset to 0 and re-reveal.
     var revealedUpTo by rememberSaveable { mutableIntStateOf(0) }
 
     // hasComposedBefore distinguishes "first composition ever" from
     // "re-composition after the LazyColumn item was disposed and restored".
     // On re-composition during streaming, fast-forward the queue past
-    // everything that arrived while we were disposed — otherwise the user
-    // would see only paragraphs revealed before they scrolled away, plus
-    // a slow typewriter resumption on the in-progress one, while paragraphs
-    // streamed during the gap stay queued behind. New paragraphs that arrive
-    // after this point still typewriter normally.
+    // everything that arrived while we were disposed — see longer note on
+    // the same pattern preserved from the paragraph-only version.
     var hasComposedBefore by rememberSaveable { mutableStateOf(false) }
     LaunchedEffect(Unit) {
-        if (hasComposedBefore && isStreaming && revealedUpTo < paragraphs.size) {
-            revealedUpTo = paragraphs.size
+        if (hasComposedBefore && isStreaming && revealedUpTo < blocks.size) {
+            revealedUpTo = blocks.size
         }
         hasComposedBefore = true
     }
 
     val config = LocalChatConfig.current
+    val textColor = chatColors.assistantText
     Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(config.paragraphSpacing)) {
-        paragraphs.forEachIndexed { index, paragraphText ->
-            // During streaming, skip paragraphs that haven't reached their turn yet
+        blocks.forEachIndexed { index, block ->
+            // During streaming, skip blocks that haven't reached their turn yet
             if (isStreaming && index > revealedUpTo) return@forEachIndexed
 
             val shouldReveal = isStreaming && index == revealedUpTo
+            val onRevealComplete: () -> Unit = { revealedUpTo = index + 1 }
 
             key(index) {
-                AnimatedParagraph(
-                    text = paragraphText,
-                    isComplete = !isStreaming || index < revealedUpTo,
-                    isStreaming = isStreaming,
-                    shouldReveal = shouldReveal,
-                    onRevealComplete = {
-                        // Advance to the next paragraph in the queue
-                        revealedUpTo = index + 1
-                    },
-                    colors = markdownColors,
-                )
+                when (block) {
+                    is MarkdownBlock.Paragraph -> AnimatedParagraph(
+                        parsed = block.text,
+                        isStreaming = isStreaming,
+                        shouldReveal = shouldReveal,
+                        onRevealComplete = onRevealComplete,
+                        textColor = textColor,
+                    )
+                    is MarkdownBlock.Table -> {
+                        MarkdownTable(table = block, textColor = textColor)
+                        // Tables don't typewriter — advance the reveal queue
+                        // immediately so the next block can start.
+                        if (shouldReveal) {
+                            LaunchedEffect(Unit) { onRevealComplete() }
+                        }
+                    }
+                }
             }
         }
         Spacer(modifier = Modifier.height(config.markdownTrailingSpacer))
@@ -326,32 +232,30 @@ private fun MarkdownText(
 }
 
 /**
- * Typewriter-style reveal for a single paragraph.
+ * Typewriter-style reveal for a single pre-parsed paragraph.
  *
  * Only typewriters when [shouldReveal] is true (its turn in the queue).
- * Calls [onRevealComplete] when the animation finishes so the next
- * paragraph can start. When not streaming, shows full text immediately.
+ * Calls [onRevealComplete] when the animation finishes so the next block
+ * can start. When not streaming, shows full text immediately.
+ *
+ * Parsing happens once up in [MarkdownText] — this composable receives the
+ * resulting [AnnotatedString] so the reveal loop doesn't re-parse on every
+ * tick of the fade wave.
  */
 @Composable
 private fun AnimatedParagraph(
-    text: String,
-    isComplete: Boolean,
+    parsed: AnnotatedString,
     isStreaming: Boolean,
     shouldReveal: Boolean,
     onRevealComplete: () -> Unit,
-    colors: MarkdownColors
+    textColor: Color,
 ) {
     val config = LocalChatConfig.current
-    val parsed = remember(text, isComplete, colors) {
-        parseDocument(text, isComplete = isComplete, colors)
-    }
     val totalChars = parsed.length
 
     // Persist the typewriter progress so LazyColumn item disposal
     // (when the bubble scrolls off-screen) doesn't restart the animation
-    // from zero on the way back in. savedProgress mirrors the Animatable's
-    // value via the snapshotFlow below; remember{} seeds a new Animatable
-    // from it on re-composition.
+    // from zero on the way back in.
     var savedProgress by rememberSaveable { mutableFloatStateOf(0f) }
     val revealProgress = remember { Animatable(savedProgress) }
     val durationMs = (totalChars * 1000 / config.typewriterCharsPerSec).coerceAtLeast(config.typewriterMinMs)
@@ -360,9 +264,6 @@ private fun AnimatedParagraph(
         snapshotFlow { revealProgress.value }.collect { savedProgress = it }
     }
 
-    // Start the typewriter only when it's this paragraph's turn AND it
-    // hasn't already finished (savedProgress == 1f means we're returning
-    // to a previously-revealed paragraph; skip the animation entirely).
     LaunchedEffect(shouldReveal) {
         if (shouldReveal && revealProgress.value < 1f) {
             revealProgress.animateTo(1f, tween(durationMs, easing = LinearEasing))
@@ -376,7 +277,6 @@ private fun AnimatedParagraph(
         else -> totalChars                   // past paragraph: already revealed
     }
 
-    val textColor = LocalChatColors.current.assistantText
     val displayText = if (visibleChars >= totalChars) {
         parsed
     } else {
@@ -384,8 +284,6 @@ private fun AnimatedParagraph(
         buildAnnotatedString {
             append(sub)
             // Apply fading alpha based on distance from the leading edge.
-            // Each character's alpha only ever increases as more chars are
-            // revealed, preventing the opaque→transparent→opaque flash.
             for (i in 0 until visibleChars) {
                 val distFromFront = visibleChars - 1 - i
                 if (distFromFront < config.waveLength) {
@@ -402,6 +300,109 @@ private fun AnimatedParagraph(
         style = MaterialTheme.typography.bodyLarge,
         color = textColor
     )
+}
+
+// ---------------------------------------------------------------------------
+// Composable: Markdown table rendering
+// ---------------------------------------------------------------------------
+
+/**
+ * Render a [MarkdownBlock.Table] with per-column widths derived from the
+ * widest cell text and capped at [ChatConfig.tableColumnMaxWidth]. Wraps the
+ * whole grid in `horizontalScroll` so wide tables swipe sideways instead of
+ * cramping into the bubble.
+ *
+ * Why a [TextMeasurer] instead of `IntrinsicSize.Max`: intrinsic widths
+ * don't propagate across siblings in different `Row`s, so they can't align
+ * "all cells in column N share width X". A single measurement pass over all
+ * cells gives a stable column width that every row uses.
+ */
+@Composable
+private fun MarkdownTable(table: MarkdownBlock.Table, textColor: Color) {
+    val density = LocalDensity.current
+    val config = LocalChatConfig.current
+    val textMeasurer = rememberTextMeasurer()
+
+    val regularStyle = MaterialTheme.typography.bodyLarge
+    val headerStyle = remember(regularStyle) { regularStyle.copy(fontWeight = FontWeight.Bold) }
+    val cellHorizontalPaddingPx = with(density) {
+        (config.tableCellPaddingHorizontal * 2).roundToPx()
+    }
+    val maxColumnWidthPx = with(density) { config.tableColumnMaxWidth.roundToPx() }
+
+    val columnWidthsPx = remember(table, density, regularStyle, headerStyle, cellHorizontalPaddingPx, maxColumnWidthPx) {
+        val numCols = table.header.size
+        if (numCols == 0) return@remember emptyList<Int>()
+        (0 until numCols).map { col ->
+            val headerWidth = table.header.getOrNull(col)?.takeIf { it.isNotEmpty() }
+                ?.let { textMeasurer.measure(it, style = headerStyle).size.width } ?: 0
+            val dataMaxWidth = table.rows.maxOfOrNull { row ->
+                row.getOrNull(col)?.takeIf { it.isNotEmpty() }
+                    ?.let { textMeasurer.measure(it, style = regularStyle).size.width } ?: 0
+            } ?: 0
+            (maxOf(headerWidth, dataMaxWidth) + cellHorizontalPaddingPx)
+                .coerceAtMost(maxColumnWidthPx)
+        }
+    }
+    val columnWidths: List<Dp> = with(density) { columnWidthsPx.map { it.toDp() } }
+    val totalWidth: Dp = with(density) { columnWidthsPx.sum().toDp() }
+
+    val scrollState = rememberScrollState()
+    Column(modifier = Modifier.horizontalScroll(scrollState)) {
+        TableRow(
+            cells = table.header,
+            alignments = table.alignments,
+            columnWidths = columnWidths,
+            textColor = textColor,
+            isHeader = true,
+        )
+        HorizontalDivider(
+            modifier = Modifier.width(totalWidth),
+            color = textColor.copy(alpha = 0.2f),
+        )
+        table.rows.forEach { row ->
+            TableRow(
+                cells = row,
+                alignments = table.alignments,
+                columnWidths = columnWidths,
+                textColor = textColor,
+                isHeader = false,
+            )
+        }
+    }
+}
+
+@Composable
+private fun TableRow(
+    cells: List<AnnotatedString>,
+    alignments: List<TableAlignment>,
+    columnWidths: List<Dp>,
+    textColor: Color,
+    isHeader: Boolean,
+) {
+    val config = LocalChatConfig.current
+    Row {
+        cells.forEachIndexed { idx, cell ->
+            val textAlign = when (alignments.getOrNull(idx) ?: TableAlignment.START) {
+                TableAlignment.START -> TextAlign.Start
+                TableAlignment.CENTER -> TextAlign.Center
+                TableAlignment.END -> TextAlign.End
+            }
+            Text(
+                text = cell,
+                color = textColor,
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = if (isHeader) FontWeight.Bold else FontWeight.Normal,
+                textAlign = textAlign,
+                modifier = Modifier
+                    .width(columnWidths.getOrNull(idx) ?: 0.dp)
+                    .padding(
+                        horizontal = config.tableCellPaddingHorizontal,
+                        vertical = config.tableCellPaddingVertical,
+                    ),
+            )
+        }
+    }
 }
 
 /** Single blinking cursor rendered below the last paragraph during streaming. */

@@ -49,7 +49,7 @@ A **summer-leaning** pasta that comes together in one sheet pan plus a pot of wa
 - 12 oz **pasta** — rigatoni or orecchiette work best because the rough surfaces grab the sauce
 - 1 ball **burrata**, room temperature (this matters — cold burrata seizes up against hot pasta)
 - A generous handful of **fresh basil**, torn at the last moment
-- *Optional but excellent*: a few anchovies stirred into the oil before roasting
+- *Optional but excellent*: a few anchovies stirred into the oil before roasting (Rao's quality is worth the upgrade — see [their site](https://www.raos.com))
 
 ### Method
 
@@ -299,6 +299,37 @@ I do *light* keyword highlighting for Kotlin — `fun`, `val`, `var`, `class`, `
 Markdown is a *layout language* in disguise. The structure you choose **shapes how the answer reads** before any individual sentence does its work. A wall of text and a tight list say different things even if they cover the same content. Match the structure to the question.
             """.trimIndent()
 
+            "table" in normalized -> """
+A quick demo of *tables* — both the comfortable kind and the kind that needs to swipe.
+
+### Narrow — fits in the bubble
+
+This first one is **four columns** and sits comfortably without scrolling. It's the shape most chat tables want to be: a short comparison the eye can take in at one glance.
+
+| Course | Time | Pairing | Notes |
+| :--- | :---: | :--- | :--- |
+| **Bread & butter** | 6:30 | *Crémant d'Alsace* | warm the bread |
+| Roasted tomato pasta | 7:00 | **Vermentino** | hold the cream |
+| Bitter greens salad | 7:45 | (palate cleanser) | dress at the table |
+| Olive-oil cake | 8:30 | *Vin santo* | a thin slice |
+
+### Wide — swipe horizontally
+
+This second one has **seven columns** and overflows the bubble. The renderer wraps it in `horizontalScroll`, so you can drag sideways to see the rest. Long cells get capped at the column max (the default is `200dp`) and *wrap* onto another line.
+
+| City | Region | Population | Founded | Famous for | Best month | Vibe |
+| :--- | :--- | ---: | ---: | :--- | :---: | :--- |
+| **Lisbon** | Portugal | 547,000 | 1255 | *azulejos*, fado, custard tarts | May | slow walks, golden hour |
+| **Porto** | Portugal | 231,000 | 300 BC | *port wine*, riverside tiles | September | working-class warmth |
+| **Sintra** | Portugal | 377,000 | 1147 | *palaces in the mist*, ferns | October | melancholy and damp |
+| **Évora** | Portugal | 56,000 | 60 BC | Roman temple, *megaliths* | April | empty squares at dusk |
+| **Aveiro** | Portugal | 78,000 | 950 | canals, *ovos moles* | June | Portuguese Venice (sort of) |
+
+Inline markdown inside cells works too — *italics*, **bold**, and `code` all parse normally. Cell alignment comes from the `:---`/`---:`/`:---:` syntax on the divider row.
+
+> One *limitation* worth knowing: the table has to be its own paragraph (a blank line above and below). A pipe row mid-paragraph parses as ordinary text.
+            """.trimIndent()
+
             else -> """
 ## Hello — and welcome to MyAI
 
@@ -310,7 +341,7 @@ This is a *gentle* assistant for the kinds of questions that **don't** have a on
 - **Travel ideas** — ask about a *trip* or *vacation* and I'll lean toward slow, walkable itineraries with room for the unplanned
 - **Weather narratives** — ask about the *weather* and you'll get something more readable than a number
 - **Code snippets** — ask about *kotlin* (or other languages) and you'll get working examples plus the small footnotes that make the difference between code that compiles and code that's good
-- **Markdown demos** — ask about *markdown* or *format* if you want to see the typography in action
+- **Markdown demos** — ask about *markdown* or *format* if you want to see the typography in action — and yes, [links work too](https://github.com/chinalwb/lovechat)
 
 ### How I respond
 

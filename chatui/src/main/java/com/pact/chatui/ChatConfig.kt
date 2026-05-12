@@ -47,6 +47,19 @@ data class ChatConfig(
      * Thinking to Streaming state.
      */
     val thinkingDelayMs: Long = 800L,
+
+    /** Horizontal padding inside each markdown table cell. */
+    val tableCellPaddingHorizontal: Dp = 6.dp,
+
+    /** Vertical padding inside each markdown table cell. */
+    val tableCellPaddingVertical: Dp = 4.dp,
+
+    /**
+     * Maximum width any single table column can claim. Caps a long cell so
+     * one oversized entry can't blow the table out — content beyond this
+     * wraps via the default `Text` soft-wrap.
+     */
+    val tableColumnMaxWidth: Dp = 200.dp,
 )
 
 /** Composition-local handle on the active [ChatConfig]. Defaults to [ChatConfig]. */
