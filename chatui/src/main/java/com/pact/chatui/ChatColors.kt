@@ -32,6 +32,7 @@ data class ChatColors(
     val composerOnSurface: Color,
     val composerDivider: Color,
     val composerHintText: Color,
+    val linkColor: Color,
     val backgroundGradient: List<Color>,
 )
 
@@ -61,6 +62,7 @@ object ChatDefaults {
             composerOnSurface = cs.onSurface,
             composerDivider = cs.outlineVariant.copy(alpha = 0.6f),
             composerHintText = cs.onSurfaceVariant,
+            linkColor = cs.primary,
             backgroundGradient = listOf(
                 cs.background,
                 cs.surfaceVariant.copy(alpha = 0.55f),
