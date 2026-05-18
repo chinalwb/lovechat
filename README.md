@@ -46,7 +46,20 @@ Both demo apps install side-by-side (different `applicationId`s) and consume the
 
 - **SSE-style streaming.** Replies arrive as variable-sized chunks at randomized 15–60ms intervals. Splits ignore word/markdown boundaries — same shape as a real upstream byte stream — and the renderer handles partial-token text gracefully.
 - **Per-paragraph typewriter.** Each paragraph reveals character-by-character on its own animation, with a soft fading-wave at the leading edge that hides any lag between the network rate and the visible reveal rate.
-- **Markdown without regex.** Character-scanning parser handles `**bold**`, `*italic*`, `` `inline code` ``, `# / ## / ###` headings, `- ` bullets, `> ` blockquotes, and fenced code blocks with light Kotlin keyword highlighting.
+- **Markdown without regex.** A hand-rolled character-scanning parser drives the renderer; the supported syntax covers what an LLM reply typically emits:
+
+  | Syntax | Renders as |
+  |---|---|
+  | `**bold**`, `*italic*` | bold / italic inline spans |
+  | `` `inline code` `` | monospace inline span with code-tint background |
+  | `# H1` &nbsp;·&nbsp; `## H2` &nbsp;·&nbsp; `### H3` | three heading levels |
+  | `- item` | bullet list (one level) |
+  | `> quote` | left-rule blockquote |
+  | ` ```lang ` … ` ``` ` | fenced code block, language label, light Kotlin keyword highlighting |
+  | `[text](https://…)` | themed clickable link |
+  | `\| col \| col \|` + `\| :--- \| ---: \|` | real grid table — per-column alignment, content-sized columns, horizontal scroll for wide tables, inline markdown inside cells |
+
+  Unclosed fences and partial table rows mid-stream render gracefully — code reads as plain monospace until the closing fence arrives, and a half-built table just shows the rows it has so far.
 - **Pinned user message.** When you hit send, the user message snaps to the top of the viewport and stays there while the assistant's reply unfolds below — the conversation reads as turns, not as an infinite scroll.
 - **Follow mode (opt-in auto-scroll).** Off by default; activates when the user scrolls to the bottom mid-stream or taps the jump-to-bottom FAB. Any user scroll-up turns it back off. Pointer-gated so programmatic scrolls can't accidentally toggle it.
 - **Edge-to-edge keyboard handling.** Composer slides up under the keyboard via a critically-damped Compose spring driven by `WindowInsets.imeAnimationTarget` (decoupled from the system's IME curve to avoid overshoot on certain devices), with `windowSoftInputMode="adjustNothing"` so Compose is the single source of truth for inset handling.
