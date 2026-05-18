@@ -10,11 +10,11 @@ The chat experience is intentionally locally driven — there's no real backend 
 
 **`:demo-myai`** — sunset palette, serif typography, custom hamburger top bar and pill composer:
 
-https://github.com/user-attachments/assets/a52a027c-84b2-4466-b7c0-8c8bfd1667a6
+https://github.com/user-attachments/assets/80896ee9-3b0c-4fca-bd60-b58e00dbfe2f
 
 **`:app`** — clean light theme, default top bar and composer:
 
-https://github.com/user-attachments/assets/a657c24c-5328-42f2-b370-8fa4989eda9c
+https://github.com/user-attachments/assets/ad09c5d7-1738-4279-b756-8dfdd69a00c8
 
 ## Modules
 
