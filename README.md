@@ -4,17 +4,17 @@
 
 A streaming-style AI-chat interface built with Jetpack Compose and Material 3, packaged as a small reusable library (`:chatui`) plus two demo apps that show how the same library can power very different products.
 
-The chat experience is intentionally locally driven — there's no real backend — so the focus is on the interaction itself: how the streaming text feels, how the keyboard slides up, how messages scroll, how a top bar and composer come together at the screen edges.
+The chat experience is intentionally locally driven — there's no real backend — so the focus is on the interaction itself: how the streaming text feels, how a sent message pins to the top while the keyboard slides away, how messages scroll, how a top bar and composer come together at the screen edges.
 
 ## Demos
 
 **`:demo-myai`** — sunset palette, serif typography, custom hamburger top bar and pill composer:
 
-https://github.com/user-attachments/assets/80896ee9-3b0c-4fca-bd60-b58e00dbfe2f
+https://github.com/user-attachments/assets/8ce44009-717f-47ce-831c-851876271260
 
 **`:app`** — clean light theme, default top bar and composer:
 
-https://github.com/user-attachments/assets/ad09c5d7-1738-4279-b756-8dfdd69a00c8
+https://github.com/user-attachments/assets/2d2718a7-dcf6-442c-bb7a-3f556dad7fc9
 
 ## Modules
 
@@ -60,9 +60,9 @@ Both demo apps install side-by-side (different `applicationId`s) and consume the
   | `\| col \| col \|` + `\| :--- \| ---: \|` | real grid table — per-column alignment, content-sized columns, horizontal scroll for wide tables, inline markdown inside cells |
 
   Unclosed fences and partial table rows mid-stream render gracefully — code reads as plain monospace until the closing fence arrives, and a half-built table just shows the rows it has so far.
-- **Pinned user message.** When you hit send, the user message snaps to the top of the viewport and stays there while the assistant's reply unfolds below — the conversation reads as turns, not as an infinite scroll.
+- **Pinned user message.** When you hit send, the user message is hard-cut to the top of the viewport on the very first frame it exists — no scroll animation, no intermediate positions — and stays there while the assistant's reply unfolds below, so the conversation reads as turns, not as an infinite scroll. The previous turn is simply above the fold; the only motion on send is the keyboard and composer sliding away. A trailing spacer, sized from the same-frame viewport height, holds the pin steady while the keyboard closes and persists after the reply completes, so a short answer never slides the conversation down.
 - **Follow mode (opt-in auto-scroll).** Off by default; activates when the user scrolls to the bottom mid-stream or taps the jump-to-bottom FAB. Any user scroll-up turns it back off. Pointer-gated so programmatic scrolls can't accidentally toggle it.
-- **Edge-to-edge keyboard handling.** Composer slides up under the keyboard via a critically-damped Compose spring driven by `WindowInsets.imeAnimationTarget` (decoupled from the system's IME curve to avoid overshoot on certain devices), with `windowSoftInputMode="adjustNothing"` so Compose is the single source of truth for inset handling.
+- **Edge-to-edge keyboard handling.** Composer rides the keyboard up and down via a critically-damped Compose spring driven by `WindowInsets.imeAnimationTarget` (decoupled from the system's IME curve to avoid overshoot on certain devices), with `windowSoftInputMode="adjustNothing"` so Compose is the single source of truth for inset handling. The message list is top-anchored and only its bottom edge moves with the inset, which is why the pinned message never shifts while the keyboard animates.
 - **Glassy bars.** Top bar and composer wrappers paint translucent gradient backdrops that fade into the chat color, so scrolling messages dissolve behind the bars instead of bleeding into the status bar / nav bar areas.
 
 ## Build & run
