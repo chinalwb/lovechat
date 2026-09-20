@@ -57,6 +57,7 @@ import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
@@ -453,27 +454,38 @@ private fun JumpToBottomButton(
 }
 
 // ---------------------------------------------------------------------------
-// Composable: Message bubble with entry animation
+// Composable: Message bubble
 // ---------------------------------------------------------------------------
 
+/**
+ * Entry animation differs by sender, on purpose:
+ * - User bubble: none. A new turn is pinned to the top in the same frame it
+ *   appears (see the pin logic in [ChatScreenInternal]), and the bubble
+ *   must be fully opaque on that frame or the pinned spot looks empty for
+ *   a few frames and the cut no longer reads as instant.
+ * - Assistant bubble: 350ms fade-in, so the "Assistant" label, thinking
+ *   indicator and the start of the streamed reply ease in below the
+ *   already-pinned user message instead of popping.
+ */
 @Composable
 private fun MessageBubble(message: ChatMessage) {
     val config = LocalChatConfig.current
     val colors = LocalChatColors.current
-    // Entry animation: fade in only (no slide — the bubble grows via animateContentSize)
-    val alpha = remember { Animatable(0f) }
-
-    LaunchedEffect(Unit) {
-        alpha.animateTo(1f, tween(350, easing = FastOutSlowInEasing))
-    }
 
     val isUser = message.sender == MessageSender.User
     val arrangement = if (isUser) Arrangement.End else Arrangement.Start
 
+    val alpha = remember { Animatable(if (isUser) 1f else 0f) }
+    if (!isUser) {
+        LaunchedEffect(Unit) {
+            alpha.animateTo(1f, tween(350, easing = FastOutSlowInEasing))
+        }
+    }
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .graphicsLayer { this.alpha = alpha.value },
+            .then(if (isUser) Modifier else Modifier.graphicsLayer { this.alpha = alpha.value }),
         horizontalArrangement = arrangement
     ) {
         Column(
@@ -746,6 +758,20 @@ fun ChatScreen(
     }
 }
 
+/**
+ * Plain (non-snapshot) scratch holder for the pin logic. Deliberately not
+ * Compose state: writing it from `SideEffect` / `derivedStateOf` must not
+ * schedule another recomposition.
+ */
+private class PinnedTurnMemo {
+    /** Index of the user message the current turn is anchored on. */
+    var anchorIdx: Int = -1
+    /** Last measured height of the turn's items incl. spacing, in px. */
+    var contentPx: Int = 0
+    /** Id of the user message most recently pinned to the top. */
+    var pinnedId: String? = null
+}
+
 @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 private fun ChatScreenInternal(
@@ -765,7 +791,11 @@ private fun ChatScreenInternal(
 
     val topBarHeightPx = remember { mutableIntStateOf(0) }
     val composerHeightPx = remember { mutableIntStateOf(0) }
-    val boxHeightPx = remember { mutableIntStateOf(0) }
+    // Height of the OUTER frame (full screen, before the IME/nav-bar inset
+    // is subtracted). Stable across keyboard animations, so the viewport
+    // height can be derived at composition time as
+    // `frameHeightPx - animatedBottomInsetPx` with no one-frame lag.
+    val frameHeightPx = remember { mutableIntStateOf(0) }
 
     val topBarPadding = with(density) {
         if (topBarHeightPx.intValue == 0) 0.dp else topBarHeightPx.intValue.toDp()
@@ -802,34 +832,68 @@ private fun ChatScreenInternal(
     )
     val animatedBottomInsetDp = with(density) { animatedBottomInsetPx.toDp() }
 
-    // Extra bottom padding during streaming: fills remaining viewport below
-    // the last user message + assistant content, so the user message can be
-    // pinned at the top. Shrinks as the assistant response grows.
+    // Trailing spacer that pins the last user message ("the anchor") at the
+    // top of the viewport. It fills whatever the current turn's items (user
+    // bubble + assistant reply) leave empty below them, shrinks as the reply
+    // grows, and reaches 0 once the reply overflows the viewport.
+    //
+    // Three properties keep the pin jump-free:
+    //
+    // 1. Sized from the COMPOSITION-TIME viewport height
+    //    (frameHeightPx - animatedBottomInsetPx), not from the inner Box's
+    //    onSizeChanged. onSizeChanged reports one frame late, and while the
+    //    keyboard slides away the viewport grows by up to ~30dp per frame; a
+    //    stale spacer would leave the content short of the viewport for
+    //    that frame and LazyColumn would pull the anchored bubble down to
+    //    close the gap. Deriving the inset padding and the spacer from the
+    //    same animated value keeps them in lockstep.
+    // 2. PERSISTS after streaming ends. Dropping it on completion would let
+    //    a short reply's content fall short of the viewport, and the whole
+    //    conversation would slide down. The pinned layout stays until the
+    //    next turn re-anchors on the new user message.
+    // 3. REMEMBERS the turn's measured height. layoutInfo only reports
+    //    visible items, so once the user scrolls the turn out of view the
+    //    spacer would otherwise snap back to full height.
     val spacingPx = with(density) { 14.dp.roundToPx() }
-    // Height of the spacer item at the end of the LazyColumn, used to pin
-    // the user message at the top. Shrinks as the assistant response grows.
-    val spacerHeightPx by remember(isStreaming) {
+    val fixedVerticalPaddingPx = with(density) { 24.dp.roundToPx() }
+    val lastUserIdx = messages.indexOfLast { it.sender == MessageSender.User }
+    // `messages` may be a plain List from a host; route the two values the
+    // derived state needs through State so changes are tracked either way.
+    val anchorIdxState = rememberUpdatedState(lastUserIdx)
+    val messageCountState = rememberUpdatedState(messages.size)
+    val turnMemo = remember { PinnedTurnMemo() }
+    val spacerHeightPx by remember(density) {
         derivedStateOf {
-            if (!isStreaming) return@derivedStateOf 0
+            val anchorIdx = anchorIdxState.value
+            if (anchorIdx < 0) return@derivedStateOf 0
 
-            val fixedVerticalPaddingPx = with(density) { 24.dp.roundToPx() }
-            val availableHeightPx = boxHeightPx.intValue -
+            val viewportHeightPx = frameHeightPx.intValue - animatedBottomInsetPx
+            val availableHeightPx = viewportHeightPx -
                 topBarHeightPx.intValue - composerHeightPx.intValue - fixedVerticalPaddingPx
             if (availableHeightPx <= 0) return@derivedStateOf 0
 
-            // Only measure real message items (exclude the spacer itself)
-            val lastUserIdx = messages.indexOfLast { it.sender == MessageSender.User }
+            // Only measure real message items (exclude the spacer itself).
+            val messageCount = messageCountState.value
             val relevantItems = listState.layoutInfo.visibleItemsInfo
-                .filter { it.index >= lastUserIdx && it.index < messages.size }
-            if (relevantItems.isEmpty()) return@derivedStateOf availableHeightPx
+                .filter { it.index >= anchorIdx && it.index < messageCount }
+            val turnContentPx = if (relevantItems.isEmpty()) {
+                // Either the turn scrolled out of view (reuse its last
+                // measurement) or it hasn't been laid out yet (0 → full
+                // height, so the pin request has room to land).
+                if (turnMemo.anchorIdx == anchorIdx) turnMemo.contentPx else 0
+            } else {
+                // One gap per relevant item: between consecutive items,
+                // plus the gap between the last item and the spacer.
+                val measured = relevantItems.sumOf { it.size } + relevantItems.size * spacingPx
+                turnMemo.anchorIdx = anchorIdx
+                turnMemo.contentPx = measured
+                measured
+            }
 
-            val totalItemsHeight = relevantItems.sumOf { it.size }
-            val totalSpacing = (relevantItems.size - 1).coerceAtLeast(0) * spacingPx
-
-            (availableHeightPx - totalItemsHeight - totalSpacing).coerceAtLeast(0) //  theSpacerHeight
+            (availableHeightPx - turnContentPx).coerceAtLeast(0)
         }
     }
-    val spacerHeight = with(density) { spacerHeightPx.toDp() } //; Log.d("xx", "ChatScreen: spacerHeight == $spacerHeight")
+    val spacerHeight = with(density) { spacerHeightPx.toDp() }
 
     // Follow mode: controls whether the viewport auto-scrolls to follow
     // new streaming content. OFF by default — user opts in via FAB or
@@ -878,6 +942,11 @@ private fun ChatScreenInternal(
             val msgs = messagesState.value
             if (msgs.isEmpty()) return@derivedStateOf false
             val info = listState.layoutInfo
+            // layoutInfo lags composition by a frame: right after a send the
+            // new items exist in `msgs` but not yet in the layout. Treating
+            // "not laid out" as "below the fold" flashed the FAB for one
+            // frame on every send — wait until the layout has caught up.
+            if (info.totalItemsCount <= msgs.lastIndex) return@derivedStateOf false
             val lastMsg = info.visibleItemsInfo.find { it.index == msgs.lastIndex }
             val visibleBottom = info.viewportEndOffset - info.afterContentPadding
             val textBottom = lastMsg?.let { it.offset + it.size - trailingDecorationPx }
@@ -886,11 +955,31 @@ private fun ChatScreenInternal(
         }
     }
 
-    // Pin user message to top when a new conversation round starts
-    LaunchedEffect(messages.size) {
-        val lastUserIdx = messages.indexOfLast { it.sender == MessageSender.User }
-        if (lastUserIdx >= 0) {
-            listState.animateScrollToItem(lastUserIdx)
+    // Pin the new user message to the top of the viewport the moment a turn
+    // starts — a hard cut, not a scroll animation. `requestScrollToItem` is
+    // non-suspending and applies at the next measure pass, and `SideEffect`
+    // runs after composition but before this frame's layout, so the very
+    // first frame that contains the new bubble already draws it pinned. The
+    // previous turn is simply above the fold; the keyboard and composer
+    // then slide away on their own animation with nothing else moving.
+    //
+    // (The old LaunchedEffect + animateScrollToItem rendered one frame with
+    // the bubble at the bottom, then flew it up over ~300ms while the
+    // keyboard was also sliding away — two motions at once.)
+    //
+    // Keyed on the message id rather than messages.size so an assistant
+    // placeholder appended in a later frame doesn't re-trigger it. Gated on
+    // frameHeightPx so a cold start waits one frame for the measured chrome
+    // heights instead of pinning against a zero-height viewport.
+    val lastUserMessageId = messages.getOrNull(lastUserIdx)?.id
+    val pinMemo = remember { PinnedTurnMemo() }
+    if (lastUserMessageId != null &&
+        lastUserMessageId != pinMemo.pinnedId &&
+        frameHeightPx.intValue > 0
+    ) {
+        SideEffect {
+            pinMemo.pinnedId = lastUserMessageId
+            listState.requestScrollToItem(lastUserIdx)
         }
     }
 
@@ -982,7 +1071,8 @@ private fun ChatScreenInternal(
 
     /**
      * Two layers:
-     * - The OUTER Box paints the gradient at full screen, unconditionally.
+     * - The OUTER Box paints the gradient at full screen, unconditionally,
+     *   and reports the full frame height (see `frameHeightPx`).
      *   Keeping the background and the inset-padding on different layers
      *   guarantees no black gap appears below the children area mid-animation
      *   (Compose's `padding` modifier shrinks the drawn area when chained
@@ -998,12 +1088,12 @@ private fun ChatScreenInternal(
                     colors = backgroundGradient,
                 )
             )
+            .onSizeChanged { frameHeightPx.intValue = it.height }
     ) {
       Box(
         modifier = Modifier
             .fillMaxSize()
             .padding(bottom = animatedBottomInsetDp)
-            .onSizeChanged { boxHeightPx.intValue = it.height }
     ) {
         // Message list — NO weight, NO SpaceBetween.
         // Few messages sit at the top with empty space below.
